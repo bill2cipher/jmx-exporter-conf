@@ -44,6 +44,7 @@ func (j *JMX) beans() ([]string, error) {
 	if beans, err := j.execute("beans", j.url); err != nil {
 		return nil, err
 	} else {
-		return strings.Split(beans, "\n"), nil
+		bs := strings.Split(beans, "\n")
+		return bs, nil
 	}
 }
