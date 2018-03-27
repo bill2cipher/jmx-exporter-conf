@@ -10,14 +10,36 @@ import (
 
 // JMX represents jmx command
 type JMX struct {
-	url string
+	url   string
+	beans map[string][]string
 }
 
 // NewJMX is used to build new JMX
 func NewJMX(url string) *JMX {
-	return &JMX{
-		url: url,
+	j := &JMX{
+		url:   url,
+		beans: make(map[string][]string),
 	}
+	if err := j.init(); err != nil {
+		panic(err.Error())
+	}
+	return j
+}
+
+func (j *JMX) init() error {
+	beans, err := j.allBeans()
+	if err != nil {
+		return err
+	}
+	for _, b := range beans {
+		pair := strings.Split(b, ":")
+		if len(pair) != 2 {
+			mesg := fmt.Sprintf("bean %s format error", b)
+			panic(mesg)
+		}
+		j.beans[pair[0]] = append(j.beans[pair[0]], pair[1])
+	}
+	return nil
 }
 
 func (j *JMX) execute(cmd, url string) (string, error) {
@@ -32,19 +54,32 @@ func (j *JMX) execute(cmd, url string) (string, error) {
 	return stdOut.String(), nil
 }
 
-func (j *JMX) domains() ([]string, error) {
-	if domains, err := j.execute("domains", j.url); err != nil {
-		return nil, err
-	} else {
-		return strings.Split(domains, "\n"), nil
+func (j *JMX) Domains() []string {
+	keys := make([]string, 0, len(j.beans))
+	for k := range j.beans {
+		keys = append(keys, k)
 	}
+	return keys
 }
 
-func (j *JMX) beans() ([]string, error) {
+func (j *JMX) Beans(domain string) []string {
+	if beans, exist := j.beans[domain]; exist {
+		return beans
+	}
+	return nil
+}
+
+func (j *JMX) allBeans() ([]string, error) {
 	if beans, err := j.execute("beans", j.url); err != nil {
 		return nil, err
 	} else {
 		bs := strings.Split(beans, "\n")
-		return bs, nil
+		var result []string
+		for _, b := range bs {
+			if b != "" {
+				result = append(result, b)
+			}
+		}
+		return result, nil
 	}
 }
