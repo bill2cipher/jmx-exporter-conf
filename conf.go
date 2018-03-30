@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -10,9 +13,10 @@ import (
 )
 
 type rule struct {
-	Pattern string `yaml:"pattern"`
-	Name    string `yaml:"name"`
-	content string `ymal:"-"`
+	Pattern string            `yaml:"pattern"`
+	Name    string            `yaml:"name"`
+	Bean    *ViewBean         `yaml:"-"`
+	Labels  map[string]string `yaml:"labels"`
 }
 
 type Conf struct {
@@ -34,18 +38,25 @@ func NewConf(url string) *Conf {
 	return c
 }
 
-func (c *Conf) addRule(r string) {
-	if c.removeIfExist(r) {
+func (c *Conf) addRule(bean *ViewBean) {
+	if c.removeIfExist(bean) {
 		return
 	}
-	c.Rules = append(c.Rules, &rule{Pattern: c.parsePattern(r), Name: r, content: r})
+	labels := make(map[string]string)
+	for _, l := range bean.labels {
+		if !l.used {
+			continue
+		}
+		labels[l.name] = fmt.Sprintf("$%d", l.index)
+	}
+	c.Rules = append(c.Rules, &rule{Pattern: c.parsePattern(bean), Name: bean.domain, Bean: bean, Labels: labels})
 }
 
-func (c *Conf) removeIfExist(r string) bool {
+func (c *Conf) removeIfExist(bean *ViewBean) bool {
 	var result []*rule
 	exist := false
 	for _, v := range c.Rules {
-		if v.content != r {
+		if v.Bean != bean {
 			result = append(result, v)
 		} else {
 			exist = true
@@ -53,6 +64,19 @@ func (c *Conf) removeIfExist(r string) bool {
 	}
 	c.Rules = result
 	return exist
+}
+
+func (c *Conf) parsePattern(bean *ViewBean) string {
+	var result bytes.Buffer
+	var pairs []string
+	result.WriteString(bean.domain)
+	result.WriteByte('<')
+	for _, l := range bean.labels {
+		pairs = append(pairs, fmt.Sprintf("%s=\"([\\w-]*)\"", l.name))
+	}
+	result.WriteString(strings.Join(pairs, ","))
+	result.WriteString("><>([^:]*):(.*)")
+	return result.String()
 }
 
 func (c *Conf) dump() (string, error) {
@@ -67,22 +91,13 @@ func (c *Conf) save() error {
 	content, err := c.dump()
 	if err != nil {
 		return err
+	} else if err := clipboard.WriteAll(content); err == nil {
+		return nil
+	} else if file, err := os.OpenFile("./conf.yaml", os.O_WRONLY|os.O_CREATE, 0666); err != nil {
+		return err
+	} else if _, err := io.WriteString(file, content); err != nil {
+		return err
 	} else {
-		return clipboard.WriteAll(content)
+		return errors.New("save to clipboard failed, save into file conf.yaml instead")
 	}
-}
-
-func (c *Conf) parsePattern(r string) string {
-	var result bytes.Buffer
-	var pairs []string
-	rule := strings.Split(r, ":")
-	result.WriteString(rule[0])
-	result.WriteByte('<')
-	values := strings.Split(rule[1], ",")
-	for _, v := range values {
-		pairs = append(pairs, fmt.Sprintf("%s=\"(.*)\"", strings.Split(v, "=")[0]))
-	}
-	result.WriteString(strings.Join(pairs, ","))
-	result.WriteString("><>([^:]*):\\s(.*)")
-	return result.String()
 }

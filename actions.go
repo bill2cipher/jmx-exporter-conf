@@ -59,11 +59,16 @@ func (v *View) domainCusorDown(g *gocui.Gui, view *gocui.View) error {
 	x, y := view.Cursor()
 	_, ylimit := view.Size()
 	y++
+
+	limit := ylimit
+	if ylimit > len(v.domains) {
+		limit = len(v.domains)
+	}
 	if y >= ylimit && v.domainIdx < len(v.domains)-ylimit {
 		v.domainIdx++
 		v.refreshDomain()
 		return nil
-	} else if y >= ylimit {
+	} else if y >= limit {
 		v.logInfo("reach domain bottom")
 		return nil
 	} else if err := view.SetCursor(x, y); err != nil {
@@ -136,13 +141,24 @@ func (v *View) selectBean(g *gocui.Gui, view *gocui.View) error {
 		return nil
 	}
 	v.logInfo("select mbean %s", beanName)
-	domainName, _ := v.currentDomainName()
-	v.cfg.addRule(fmt.Sprintf("%s:%s", domainName, beanName))
+	v.setCurrentBean(beanName)
 	v.toggleBeanUsed(beanName)
 
+	v.cfg.addRule(v.currentBean)
 	v.refreshConf()
 	v.refreshBean()
 	return nil
+}
+
+func (v *View) setCurrentBean(beanName string) {
+	if v.currentDomain == nil {
+		return
+	}
+	for _, b := range v.currentDomain.beans {
+		if b.name == beanName {
+			v.currentBean = b
+		}
+	}
 }
 
 func (v *View) toggleBeanUsed(beanName string) {
@@ -187,10 +203,17 @@ func (v *View) beanCursorDown(g *gocui.Gui, view *gocui.View) error {
 		v.currentDomain.beanIdx++
 		v.refreshBean()
 		return nil
-	} else if y >= ylimit {
+	}
+
+	limit := ylimit
+	if ylimit >= len(v.currentDomain.beans) {
+		limit = len(v.currentDomain.beans)
+	}
+	if y >= limit {
 		v.logInfo("reach bottom now!!!!")
 		return nil
 	}
+
 	return view.SetCursor(x, y)
 }
 
@@ -199,12 +222,14 @@ func (v *View) quit(g *gocui.Gui, view *gocui.View) error {
 }
 
 func (v *View) nextView(g *gocui.Gui, view *gocui.View) error {
-	nextIndex := (v.active + 1) % 2
+	nextIndex := (v.active + 1) % 3
 	name := ""
 	if nextIndex == 0 {
 		name = "domain"
 	} else if nextIndex == 1 {
 		name = "bean"
+	} else if nextIndex == 2 {
+		name = "label"
 	}
 
 	if _, err := v.setCurrentViewOnTop(g, name); err != nil {

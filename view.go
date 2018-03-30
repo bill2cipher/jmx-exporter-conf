@@ -7,10 +7,17 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
+type ViewLabel struct {
+	name, value string
+	index       int
+	used        bool
+}
+
 type ViewBean struct {
-	name   string
-	used   bool
-	domain string
+	domain, name     string
+	labels           []*ViewLabel
+	valueName, value string
+	used             bool
 }
 
 type ViewDomain struct {
@@ -25,6 +32,7 @@ type View struct {
 
 	domainView *gocui.View
 	beanView   *gocui.View
+	labelView  *gocui.View
 	confView   *gocui.View
 	logView    *gocui.View
 	active     int
@@ -33,6 +41,7 @@ type View struct {
 	domainList    []string
 	domainIdx     int
 	currentDomain *ViewDomain
+	currentBean   *ViewBean
 }
 
 var (
@@ -60,7 +69,7 @@ func Start(jmx *JMX, cfg *Conf) {
 
 	v.bindActions(g)
 	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
-		v.logInfo(err.Error())
+		panic(err.Error())
 	}
 }
 
@@ -73,8 +82,28 @@ func (v *View) init() {
 		beans := v.jmx.Beans(d)
 		v.domainList = append(v.domainList, d)
 		for _, b := range beans {
-			v.domains[d].beans = append(v.domains[d].beans, &ViewBean{name: b, used: false, domain: d})
+			v.domains[d].beans = append(v.domains[d].beans, v.buildViewBean(b))
 		}
+	}
+}
+
+func (v *View) buildViewBean(bean *JMXBean) *ViewBean {
+	var labels []*ViewLabel
+	for _, l := range bean.Labels {
+		labels = append(labels, &ViewLabel{
+			name:  l.Name,
+			value: l.Value,
+			index: l.Index,
+			used:  false,
+		})
+	}
+	return &ViewBean{
+		domain:    bean.Domain,
+		name:      bean.Name,
+		valueName: bean.ValueName,
+		value:     bean.Value,
+		used:      false,
+		labels:    labels,
 	}
 }
 
@@ -87,22 +116,12 @@ func (v *View) layout(g *gocui.Gui) error {
 		return err
 	} else if err := v.logViewLayout(g); err != nil {
 		return err
+	} else if err := v.labelViewLayout(g); err != nil {
+		return err
 	}
 	if !v.inited {
 		v.inited = true
 		v.refreshViewContent()
-	}
-	return nil
-}
-
-func (v *View) confViewLayout(g *gocui.Gui) error {
-	maxX, maxY := g.Size()
-	if view, err := g.SetView("conf", maxX/2, 0, maxX-1, maxY*2/3); err != nil {
-		if err != gocui.ErrUnknownView {
-			return err
-		}
-		view.Title = "Config"
-		v.confView = view
 	}
 	return nil
 }
@@ -130,7 +149,6 @@ func (v *View) beanViewLayout(g *gocui.Gui) error {
 			return err
 		}
 		view.Title = "Beans"
-		// view.Highlight = true
 		view.SelBgColor = gocui.ColorCyan
 		view.SelFgColor = gocui.ColorMagenta
 		v.beanView = view
@@ -138,9 +156,35 @@ func (v *View) beanViewLayout(g *gocui.Gui) error {
 	return nil
 }
 
+func (v *View) labelViewLayout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if view, err := g.SetView("label", 0, maxY*2/3, maxX/2, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		view.Title = "Lables"
+		view.SelBgColor = gocui.ColorCyan
+		view.SelFgColor = gocui.ColorMagenta
+		v.labelView = view
+	}
+	return nil
+}
+
+func (v *View) confViewLayout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if view, err := g.SetView("conf", maxX/2, 0, maxX-1, maxY/3); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		view.Title = "Config"
+		v.confView = view
+	}
+	return nil
+}
+
 func (v *View) logViewLayout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
-	if view, err := g.SetView("log", 0, maxY*2/3, maxX-1, maxY-1); err != nil {
+	if view, err := g.SetView("log", maxX/2, maxY/3, maxX-1, maxY-1); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
