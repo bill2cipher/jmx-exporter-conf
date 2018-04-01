@@ -18,6 +18,7 @@ type ViewBean struct {
 	labels           []*ViewLabel
 	valueName, value string
 	used             bool
+	labelIdx         int
 }
 
 type ViewDomain struct {

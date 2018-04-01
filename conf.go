@@ -13,19 +13,19 @@ import (
 )
 
 type rule struct {
-	Pattern string            `yaml:"pattern"`
-	Name    string            `yaml:"name"`
-	Bean    *ViewBean         `yaml:"-"`
-	Labels  map[string]string `yaml:"labels"`
+	Pattern string        `yaml:"pattern"`
+	Name    string        `yaml:"name"`
+	Labels  yaml.MapSlice `yaml:"labels"`
 }
 
 type Conf struct {
-	HostPort                  string  `yaml:"hostPort"`
-	StartDelaySeconds         int     `yaml:"startDelaySeconds"`
-	Ssl                       bool    `yaml:"ssl"`
-	LowercaseOutputName       bool    `yaml:"lowercaseOutputName"`
-	LowercaseOutputLabelNames bool    `yaml:"lowercaseOutputLabelNames"`
-	Rules                     []*rule `yaml:"rules"`
+	HostPort                  string      `yaml:"hostPort"`
+	StartDelaySeconds         int         `yaml:"startDelaySeconds"`
+	Ssl                       bool        `yaml:"ssl"`
+	LowercaseOutputName       bool        `yaml:"lowercaseOutputName"`
+	LowercaseOutputLabelNames bool        `yaml:"lowercaseOutputLabelNames"`
+	Rules                     []*rule     `yaml:"rules"`
+	Beans                     []*ViewBean `yaml:"-"`
 }
 
 func NewConf(url string) *Conf {
@@ -42,27 +42,20 @@ func (c *Conf) addRule(bean *ViewBean) {
 	if c.removeIfExist(bean) {
 		return
 	}
-	labels := make(map[string]string)
-	for _, l := range bean.labels {
-		if !l.used {
-			continue
-		}
-		labels[l.name] = fmt.Sprintf("$%d", l.index)
-	}
-	c.Rules = append(c.Rules, &rule{Pattern: c.parsePattern(bean), Name: bean.domain, Bean: bean, Labels: labels})
+	c.Beans = append(c.Beans, bean)
 }
 
 func (c *Conf) removeIfExist(bean *ViewBean) bool {
-	var result []*rule
+	var result []*ViewBean
 	exist := false
-	for _, v := range c.Rules {
-		if v.Bean != bean {
-			result = append(result, v)
-		} else {
+	for _, b := range c.Beans {
+		if b == bean {
 			exist = true
+		} else {
+			result = append(result, b)
 		}
 	}
-	c.Rules = result
+	c.Beans = result
 	return exist
 }
 
@@ -75,11 +68,27 @@ func (c *Conf) parsePattern(bean *ViewBean) string {
 		pairs = append(pairs, fmt.Sprintf("%s=\"([\\w-]*)\"", l.name))
 	}
 	result.WriteString(strings.Join(pairs, ","))
-	result.WriteString("><>([^:]*):(.*)")
+	result.WriteString("><([^<>]*)>([^:]*)")
 	return result.String()
 }
 
 func (c *Conf) dump() (string, error) {
+	c.Rules = nil
+	var labels yaml.MapSlice
+	for _, b := range c.Beans {
+		for _, l := range b.labels {
+			if !l.used {
+				continue
+			}
+			labels = append(labels, yaml.MapItem{
+				Key:   l.name,
+				Value: fmt.Sprintf("$%d", l.index),
+			})
+		}
+		labelLen := len(b.labels)
+		ruleName := fmt.Sprintf("%s{$%d#$%d}", b.domain, labelLen+1, labelLen+2)
+		c.Rules = append(c.Rules, &rule{Pattern: c.parsePattern(b), Name: ruleName, Labels: labels})
+	}
 	if d, err := yaml.Marshal(c); err != nil {
 		return "", err
 	} else {

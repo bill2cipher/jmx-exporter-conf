@@ -25,14 +25,14 @@ type JMXBean struct {
 // JMX represents jmx command
 type JMX struct {
 	url   string
-	beans map[string][]*JMXBean
+	beans map[string]map[string]*JMXBean
 }
 
 // NewJMX is used to build new JMX
 func NewJMX(url string) *JMX {
 	j := &JMX{
 		url:   url,
-		beans: make(map[string][]*JMXBean),
+		beans: make(map[string]map[string]*JMXBean),
 	}
 	if err := j.init(); err != nil {
 		panic(err.Error())
@@ -61,7 +61,10 @@ func (j *JMX) init() error {
 			Value:     parts[4],
 			Labels:    j.buildLabels(parts[1]),
 		}
-		j.beans[parts[0]] = append(j.beans[parts[0]], jb)
+		if _, exist := j.beans[parts[0]]; !exist {
+			j.beans[parts[0]] = make(map[string]*JMXBean)
+		}
+		j.beans[parts[0]][parts[1]] = jb
 	}
 	return nil
 }
@@ -71,7 +74,7 @@ func (j *JMX) buildLabels(name string) []*JMXLabel {
 	var labels []*JMXLabel
 	for i, p := range parts {
 		values := strings.SplitN(p, "=", 2)
-		labels = append(labels, &JMXLabel{Name: values[0], Value: values[1], Index: i + 1})
+		labels = append(labels, &JMXLabel{Name: strings.TrimSpace(values[0]), Value: values[1], Index: i + 1})
 	}
 	return labels
 }
@@ -97,10 +100,13 @@ func (j *JMX) Domains() []string {
 }
 
 func (j *JMX) Beans(domain string) []*JMXBean {
+	var result []*JMXBean
 	if beans, exist := j.beans[domain]; exist {
-		return beans
+		for _, b := range beans {
+			result = append(result, b)
+		}
 	}
-	return nil
+	return result
 }
 
 func (j *JMX) allBeans() ([]string, error) {

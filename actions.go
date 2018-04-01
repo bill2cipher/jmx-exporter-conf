@@ -36,7 +36,19 @@ func (v *View) bindActions(g *gocui.Gui) {
 		panic(err.Error())
 	}
 
+	if err := g.SetKeybinding("label", 'j', gocui.ModNone, v.labelCursorDown); err != nil {
+		panic(err.Error())
+	}
+
+	if err := g.SetKeybinding("label", 'k', gocui.ModNone, v.labelCursorUp); err != nil {
+		panic(err.Error())
+	}
+
 	if err := g.SetKeybinding("bean", gocui.KeyEnter, gocui.ModNone, v.selectBean); err != nil {
+		panic(err.Error())
+	}
+
+	if err := g.SetKeybinding("label", gocui.KeyEnter, gocui.ModNone, v.selectLabel); err != nil {
 		panic(err.Error())
 	}
 
@@ -55,46 +67,18 @@ func (v *View) saveConf(g *gocui.Gui, view *gocui.View) error {
 	return nil
 }
 
-func (v *View) domainCusorDown(g *gocui.Gui, view *gocui.View) error {
-	x, y := view.Cursor()
-	_, ylimit := view.Size()
-	y++
-
-	limit := ylimit
-	if ylimit > len(v.domains) {
-		limit = len(v.domains)
-	}
-	if y >= ylimit && v.domainIdx < len(v.domains)-ylimit {
-		v.domainIdx++
+func (v *View) domainCusorUp(g *gocui.Gui, view *gocui.View) error {
+	if v.cursorUp(g, view, len(v.domains), &(v.domainIdx)) {
 		v.refreshDomain()
-		return nil
-	} else if y >= limit {
-		v.logInfo("reach domain bottom")
-		return nil
-	} else if err := view.SetCursor(x, y); err != nil {
-		return err
-	} else {
-		v.refreshDomain()
-		return nil
 	}
+	return nil
 }
 
-func (v *View) domainCusorUp(g *gocui.Gui, view *gocui.View) error {
-	x, y := view.Cursor()
-	y--
-	if y < 0 && v.domainIdx > 0 {
-		v.domainIdx--
+func (v *View) domainCusorDown(g *gocui.Gui, view *gocui.View) error {
+	if v.cursorDown(g, view, len(v.domains), &(v.domainIdx)) {
 		v.refreshDomain()
-		return nil
-	} else if y < 0 {
-		v.logInfo("reach domain top")
-		return nil
-	} else if err := view.SetCursor(x, y); err != nil {
-		return err
-	} else {
-		v.refreshDomain()
-		return nil
 	}
+	return nil
 }
 
 func (v *View) refreshDomain() {
@@ -124,11 +108,43 @@ func (v *View) currentDomainName() (string, error) {
 	return v.domainView.Line(y)
 }
 
+func (v *View) currentBeanName() (string, error) {
+	_, y := v.beanView.Cursor()
+	return v.beanView.Line(y)
+}
+
 func (v *View) selectDomain() error {
 	v.currentDomain.beanIdx = 0
 	v.beanView.SetCursor(0, 0)
 	v.refreshBean()
 	return nil
+}
+
+func (v *View) selectLabel(g *gocui.Gui, view *gocui.View) error {
+	_, y := view.Cursor()
+	labelName, err := view.Line(y)
+	if err != nil {
+		return err
+	}
+	if labelName == "" {
+		return nil
+	}
+	v.logInfo("select label %s", labelName)
+	v.toggleLabelUsed(labelName)
+	v.refreshLabel()
+	v.refreshConf()
+	return nil
+}
+
+func (v *View) toggleLabelUsed(labelName string) {
+	if v.currentBean == nil {
+		return
+	}
+	for _, l := range v.currentBean.labels {
+		if l.name == labelName {
+			l.used = !l.used
+		}
+	}
 }
 
 func (v *View) selectBean(g *gocui.Gui, view *gocui.View) error {
@@ -141,12 +157,12 @@ func (v *View) selectBean(g *gocui.Gui, view *gocui.View) error {
 		return nil
 	}
 	v.logInfo("select mbean %s", beanName)
-	v.setCurrentBean(beanName)
 	v.toggleBeanUsed(beanName)
 
 	v.cfg.addRule(v.currentBean)
 	v.refreshConf()
 	v.refreshBean()
+
 	return nil
 }
 
@@ -176,19 +192,10 @@ func (v *View) beanCursorUp(g *gocui.Gui, view *gocui.View) error {
 	if v.currentDomain == nil {
 		return nil
 	}
-
-	x, y := view.Cursor()
-	y--
-	if y < 0 && v.currentDomain.beanIdx > 0 {
-		v.currentDomain.beanIdx--
+	if v.cursorUp(g, view, len(v.currentDomain.beans), &(v.currentDomain.beanIdx)) {
 		v.refreshBean()
-		v.logInfo("bean idx %d", v.currentDomain.beanIdx)
-		return nil
-	} else if y < 0 {
-		v.logInfo("reach top now!!!!")
-		return nil
 	}
-	return view.SetCursor(x, y)
+	return nil
 }
 
 func (v *View) beanCursorDown(g *gocui.Gui, view *gocui.View) error {
@@ -196,25 +203,70 @@ func (v *View) beanCursorDown(g *gocui.Gui, view *gocui.View) error {
 		return nil
 	}
 
+	if v.cursorDown(g, view, len(v.currentDomain.beans), &(v.currentDomain.beanIdx)) {
+		v.refreshBean()
+	}
+	return nil
+}
+
+func (v *View) labelCursorDown(g *gocui.Gui, view *gocui.View) error {
+	if v.currentBean == nil {
+		return nil
+	}
+
+	if v.cursorDown(g, view, len(v.currentBean.labels), &(v.currentBean.labelIdx)) {
+		v.refreshLabel()
+	}
+	return nil
+}
+
+func (v *View) labelCursorUp(g *gocui.Gui, view *gocui.View) error {
+	if v.currentBean == nil {
+		return nil
+	}
+	if v.cursorUp(g, view, len(v.currentBean.labels), &(v.currentBean.labelIdx)) {
+		v.refreshLabel()
+	}
+	return nil
+}
+
+func (v *View) cursorUp(g *gocui.Gui, view *gocui.View, contentLen int, curIndex *int) bool {
+	x, y := view.Cursor()
+	y--
+	if y < 0 && (*curIndex) > 0 {
+		(*curIndex)--
+		return true
+	} else if y < 0 {
+		v.logInfo("reach top")
+		return false
+	} else if err := view.SetCursor(x, y); err != nil {
+		return false
+	} else {
+		return true
+	}
+}
+
+func (v *View) cursorDown(g *gocui.Gui, view *gocui.View, contentLen int, curIndex *int) bool {
 	x, y := view.Cursor()
 	_, ylimit := view.Size()
 	y++
-	if y >= ylimit && v.currentDomain.beanIdx < len(v.currentDomain.beans)-ylimit {
-		v.currentDomain.beanIdx++
-		v.refreshBean()
-		return nil
-	}
 
 	limit := ylimit
-	if ylimit >= len(v.currentDomain.beans) {
-		limit = len(v.currentDomain.beans)
-	}
-	if y >= limit {
-		v.logInfo("reach bottom now!!!!")
-		return nil
+	if ylimit > contentLen {
+		limit = contentLen
 	}
 
-	return view.SetCursor(x, y)
+	if y >= ylimit && (*curIndex) < contentLen-ylimit {
+		(*curIndex)++
+		return true
+	} else if y >= limit {
+		v.logInfo("reach bottom")
+		return false
+	} else if err := view.SetCursor(x, y); err != nil {
+		return false
+	} else {
+		return true
+	}
 }
 
 func (v *View) quit(g *gocui.Gui, view *gocui.View) error {
@@ -254,10 +306,28 @@ func (v *View) refreshViewContent() {
 	v.refreshConf()
 }
 
+func (v *View) refreshLabel() {
+	if v.currentBean == nil {
+		return
+	}
+	var result []string
+	bean := v.currentBean
+	for _, l := range bean.labels[bean.labelIdx:] {
+		if l.used {
+			result = append(result, fmt.Sprintf("\033[35;7m%s\033[0m", l.name))
+		} else {
+			result = append(result, l.name)
+		}
+	}
+	v.labelView.Clear()
+	fmt.Fprint(v.labelView, strings.Join(result, "\n"))
+}
+
 func (v *View) refreshBean() {
 	if v.currentDomain == nil {
 		return
 	}
+
 	var result []string
 	domain := v.currentDomain
 	for _, b := range domain.beans[domain.beanIdx:] {
@@ -269,6 +339,13 @@ func (v *View) refreshBean() {
 	}
 	v.beanView.Clear()
 	fmt.Fprint(v.beanView, strings.Join(result, "\n"))
+
+	beanName, _ := v.currentBeanName()
+	v.setCurrentBean(beanName)
+
+	v.labelView.SetCursor(0, 0)
+	v.currentBean.labelIdx = 0
+	v.refreshLabel()
 }
 
 func (v *View) refreshConf() {
